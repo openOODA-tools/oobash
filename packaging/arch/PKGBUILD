@@ -1,7 +1,7 @@
 # Maintainer: openOODA-tools <ops@openooda.org>
 pkgname=oobash-bin
 _pkgname=oobash
-pkgver=0.1.0
+pkgver=0.2.0
 pkgrel=1
 pkgdesc="Strict subset shell translating POSIX shell scripts into capability-audited openOODA AST."
 arch=('x86_64')

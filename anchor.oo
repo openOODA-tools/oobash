@@ -1,13 +1,22 @@
-// # oobash Root Anchor
+// # oobash Root Subsystem Anchor
 //
-// Logline: Top-level anchor re-exporting options, core logic, render, and ipc subsystems.
+// Logline: Sovereign bash compatibility compiler translating shell scripts into capability-audited ASTs.
 //
-// Setup: Pure shim re-exporting all oobash subsystem anchors.
+// Setup: Root barrel shim re-exporting options, core logic, render, and ipc subsystems.
 //
 // Beats:
-//   1. Re-export options parsing subsystem.
-//   2. Re-export core oobash execution engine.
-//   3. Re-export render formatting subsystem.
-//   4. Re-export Model Context Protocol (MCP) IPC subsystem.
+//   1. Re-export core lexer, parser, auditor, and transpiler.
+//   2. Re-export render formatting subsystem.
+//   3. Re-export Model Context Protocol (MCP) IPC subsystem.
 
-import "main.oo";
+import "core/anchor.oo";
+import "render/anchor.oo";
+import "ipc/anchor.oo";
+
+pub fn oobash_version() -> String {
+    return "0.2.0";
+}
+
+pub fn oobash_banner() -> String {
+    return "oobash v0.2.0 (openOODA sovereign shell compatibility compiler)";
+}

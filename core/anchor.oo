@@ -1,0 +1,23 @@
+// # oobash Core Subsystem Anchor
+//
+// Logline: Consolidates lexical analysis, parsing, security audit, and transpilation engines.
+//
+// Setup: Root barrel shim for core shell compat compiler domain.
+//
+// Beats:
+//   1. Re-export shell lexer and tokenizer.
+//   2. Re-export AST parser and pipeline constructor.
+//   3. Re-export capability security auditor and code transpiler.
+
+import "core/bash_lex.oo";
+import "core/bash_parse.oo";
+import "core/bash_audit.oo";
+import "core/bash_transpile.oo";
+
+pub fn core_subsystem_version() -> String {
+    return "0.2.0";
+}
+
+pub fn core_subsystem_description() -> String {
+    return "oobash pure openOODA shell compiler and security auditor subsystem";
+}

@@ -1,0 +1,156 @@
+// # oobash Script Parser
+//
+// Logline: Converts linear shell tokens into structured commands and pipelines.
+//
+// Setup: AST construction with capability-awareness for arguments, subshells, and redirections.
+//
+// Beats:
+//   1. Segment tokens into commands bounded by pipeline or sequence operators.
+//   2. Bind redirection targets and flags.
+//   3. Assemble pipelines and script execution plan.
+
+import "core/bash_lex.oo";
+
+pub type ShellRedirect = struct {
+    kind: String,
+    target: String
+};
+
+pub type ShellCommand = struct {
+    name: String,
+    args: List[String],
+    redirects: List[ShellRedirect],
+    is_bg: Bool
+};
+
+pub type ShellPipeline = struct {
+    commands: List[ShellCommand],
+    op: String
+};
+
+pub type ShellScript = struct {
+    pipelines: List[ShellPipeline]
+};
+
+pub fn parse_script(tokens: List[ShellToken]) -> ShellScript {
+    let mut pipelines: List[ShellPipeline] = list_new();
+    let mut curr_cmds: List[ShellCommand] = list_new();
+    let mut curr_name: String = "";
+    let mut curr_args: List[String] = list_new();
+    let mut curr_redirs: List[ShellRedirect] = list_new();
+    let mut curr_bg: Bool = false;
+
+    let n: Int = list_len(tokens);
+    let mut i: Int = 0;
+
+    while i < n {
+        let tok: ShellToken = list_get(tokens, i);
+        if tok.kind == "word" || tok.kind == "string" {
+            if chars_len(curr_name) == 0 {
+                curr_name = tok.value;
+            } else {
+                curr_args = list_push(curr_args, tok.value);
+            }
+            i = i + 1;
+        } else if tok.kind == "redir_out" || tok.kind == "append" || tok.kind == "redir_in" {
+            let mut tgt: String = "";
+            if i + 1 < n {
+                let nxt: ShellToken = list_get(tokens, i + 1);
+                if nxt.kind == "word" || nxt.kind == "string" {
+                    tgt = nxt.value;
+                    i = i + 1;
+                }
+            }
+            curr_redirs = list_push(curr_redirs, ShellRedirect { kind: tok.kind, target: tgt });
+            i = i + 1;
+        } else if tok.kind == "pipe" {
+            if chars_len(curr_name) > 0 {
+                curr_cmds = list_push(curr_cmds, ShellCommand {
+                    name: curr_name,
+                    args: curr_args,
+                    redirects: curr_redirs,
+                    is_bg: curr_bg
+                });
+                curr_name = "";
+                curr_args = list_new();
+                curr_redirs = list_new();
+                curr_bg = false;
+            }
+            i = i + 1;
+        } else if tok.kind == "semi" || tok.kind == "newline" || tok.kind == "and" || tok.kind == "or" || tok.kind == "bg" {
+            if tok.kind == "bg" {
+                curr_bg = true;
+            }
+            if chars_len(curr_name) > 0 {
+                curr_cmds = list_push(curr_cmds, ShellCommand {
+                    name: curr_name,
+                    args: curr_args,
+                    redirects: curr_redirs,
+                    is_bg: curr_bg
+                });
+                curr_name = "";
+                curr_args = list_new();
+                curr_redirs = list_new();
+                curr_bg = false;
+            }
+            if list_len(curr_cmds) > 0 {
+                pipelines = list_push(pipelines, ShellPipeline {
+                    commands: curr_cmds,
+                    op: tok.kind
+                });
+                curr_cmds = list_new();
+            }
+            i = i + 1;
+        } else {
+            i = i + 1;
+        }
+    }
+
+    if chars_len(curr_name) > 0 {
+        curr_cmds = list_push(curr_cmds, ShellCommand {
+            name: curr_name,
+            args: curr_args,
+            redirects: curr_redirs,
+            is_bg: curr_bg
+        });
+    }
+
+    if list_len(curr_cmds) > 0 {
+        pipelines = list_push(pipelines, ShellPipeline {
+            commands: curr_cmds,
+            op: "none"
+        });
+    }
+
+    return ShellScript { pipelines: pipelines };
+}
+
+pub fn count_total_commands(script: ShellScript) -> Int {
+    let mut total: Int = 0;
+    let n: Int = list_len(script.pipelines);
+    let mut i: Int = 0;
+    while i < n {
+        let p: ShellPipeline = list_get(script.pipelines, i);
+        total = total + list_len(p.commands);
+        i = i + 1;
+    }
+    return total;
+}
+
+pub fn count_total_redirects(script: ShellScript) -> Int {
+    let mut total: Int = 0;
+    let n: Int = list_len(script.pipelines);
+    let mut i: Int = 0;
+    while i < n {
+        let p: ShellPipeline = list_get(script.pipelines, i);
+        let m: Int = list_len(p.commands);
+        let mut j: Int = 0;
+        while j < m {
+            let cmd: ShellCommand = list_get(p.commands, j);
+            total = total + list_len(cmd.redirects);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    return total;
+}

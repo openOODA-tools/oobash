@@ -1,0 +1,103 @@
+// # Model Context Protocol (MCP) Stdio Server for oobash
+//
+// Logline: JSON-RPC 2.0 stdio server providing shell audit, transpilation, and AST analysis tools.
+//
+// Setup: Demands FsReadCap for stdio streaming. Operates without ambient authority.
+//
+// Beats:
+//   1. Ingest JSON-RPC 2.0 frames over stdin and dispatch RPC methods.
+//   2. Advertise shell audit, transpilation, and AST generation tools.
+//   3. Execute capability-bounded parsing and stream JSON responses.
+
+import "core/bash_lex.oo";
+import "core/bash_parse.oo";
+import "core/bash_audit.oo";
+import "core/bash_transpile.oo";
+import "render/bash_theme.oo";
+import "ipc/json_field.oo";
+
+pub fn run_mcp_server(fs: &FsReadCap) {
+    let mut running: Bool = true;
+    while running {
+        let line_res: Result[String, String] = oo_read_stdin_chunk(fs, 8192);
+        if !line_res.is_ok() {
+            running = false;
+        } else {
+            let line: String = match line_res { Ok(s) => s, Err(_) => "" };
+            let trimmed: String = str_trim(line);
+            if chars_len(trimmed) == 0 {
+                running = false;
+            } else {
+                let id: String = json_get_field(trimmed, "id");
+                let method: String = json_get_string(trimmed, "method");
+
+                if method == "initialize" {
+                    let resp: String = "{\"jsonrpc\":\"2.0\",\"id\":" + id +
+                        ",\"result\":{\"protocolVersion\":\"2024-11-05\"," +
+                        "\"serverInfo\":{\"name\":\"oobash\",\"version\":\"0.2.0\"}," +
+                        "\"capabilities\":{\"tools\":{}}}}";
+                    println(resp);
+                } else if method == "notifications/initialized" {
+                    // Ack
+                } else if method == "tools/list" {
+                    let t1: String = "{\"name\":\"bash_audit\",\"description\":\"Audit shell script for capability requirements and security risk\"," +
+                        "\"inputSchema\":{\"type\":\"object\",\"properties\":{\"script\":{\"type\":\"string\"}},\"required\":[\"script\"]}}";
+                    let t2: String = "{\"name\":\"bash_transpile\",\"description\":\"Transpile shell script to openOODA native source code\"," +
+                        "\"inputSchema\":{\"type\":\"object\",\"properties\":{\"script\":{\"type\":\"string\"}},\"required\":[\"script\"]}}";
+                    let t3: String = "{\"name\":\"bash_ast\",\"description\":\"Parse shell script into structured AST JSON\"," +
+                        "\"inputSchema\":{\"type\":\"object\",\"properties\":{\"script\":{\"type\":\"string\"}},\"required\":[\"script\"]}}";
+                    let t4: String = "{\"name\":\"bash_stats\",\"description\":\"Query oobash compiler specifications\"," +
+                        "\"inputSchema\":{\"type\":\"object\",\"properties\":{}}}";
+                    let resp: String = "{\"jsonrpc\":\"2.0\",\"id\":" + id +
+                        ",\"result\":{\"tools\":[" + t1 + "," + t2 + "," + t3 + "," + t4 + "]}}";
+                    println(resp);
+                } else if method == "tools/call" {
+                    let params: String = json_get_field(trimmed, "params");
+                    let tool_name: String = json_get_string(params, "name");
+                    let args: String = json_get_field(params, "arguments");
+
+                    if tool_name == "bash_audit" {
+                        let script_in: String = json_get_string(args, "script");
+                        let tokens: List[ShellToken] = tokenize_script(script_in);
+                        let ast: ShellScript = parse_script(tokens);
+                        let audit: BashAuditResult = audit_script(ast);
+                        let j: String = render_audit_json("stdin", audit);
+                        let resp: String = "{\"jsonrpc\":\"2.0\",\"id\":" + id +
+                            ",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"" + json_escape_string(j) + "\"}]}}";
+                        println(resp);
+                    } else if tool_name == "bash_transpile" {
+                        let script_in: String = json_get_string(args, "script");
+                        let tokens: List[ShellToken] = tokenize_script(script_in);
+                        let ast: ShellScript = parse_script(tokens);
+                        let code: String = transpile_to_openooda(ast);
+                        let j: String = render_transpile_json("stdin", code);
+                        let resp: String = "{\"jsonrpc\":\"2.0\",\"id\":" + id +
+                            ",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"" + json_escape_string(j) + "\"}]}}";
+                        println(resp);
+                    } else if tool_name == "bash_ast" {
+                        let script_in: String = json_get_string(args, "script");
+                        let tokens: List[ShellToken] = tokenize_script(script_in);
+                        let ast: ShellScript = parse_script(tokens);
+                        let j: String = render_ast_json(ast);
+                        let resp: String = "{\"jsonrpc\":\"2.0\",\"id\":" + id +
+                            ",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"" + json_escape_string(j) + "\"}]}}";
+                        println(resp);
+                    } else if tool_name == "bash_stats" {
+                        let stat: String = "{\"name\":\"oobash\",\"version\":\"0.2.0\",\"standard\":\"POSIX.1-2017 / openOODA\",\"status\":\"active\"}";
+                        let resp: String = "{\"jsonrpc\":\"2.0\",\"id\":" + id +
+                            ",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"" + json_escape_string(stat) + "\"}]}}";
+                        println(resp);
+                    } else {
+                        let err_resp: String = "{\"jsonrpc\":\"2.0\",\"id\":" + id +
+                            ",\"error\":{\"code\":-32601,\"message\":\"Method not found\"}}";
+                        println(err_resp);
+                    }
+                } else {
+                    let err_resp: String = "{\"jsonrpc\":\"2.0\",\"id\":" + id +
+                        ",\"error\":{\"code\":-32601,\"message\":\"Method not found\"}}";
+                    println(err_resp);
+                }
+            }
+        }
+    }
+}

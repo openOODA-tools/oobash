@@ -1,0 +1,66 @@
+// # oobash CLI Options Parser
+//
+// Logline: Ingests command line arguments into typed bash analysis and compilation options.
+//
+// Setup: Pure argument decoding supporting POSIX shell invocation flags.
+//
+// Beats:
+//   1. Define BashOpts data structure covering command, file, audit, and transpile flags.
+//   2. Extract flags for inline command execution (-c), transpile (-t), and audit (-a).
+//   3. Separate command string from input script files.
+
+pub type BashOpts = struct {
+    action: String,
+    mode: String,
+    inline_cmd: String,
+    script_files: List[String],
+    json_mode: Bool
+};
+
+pub fn default_bash_opts() -> BashOpts {
+    return BashOpts {
+        action: "run",
+        mode: "audit",
+        inline_cmd: "",
+        script_files: list_new(),
+        json_mode: false
+    };
+}
+
+pub fn parse_bash_args(args: List[String]) -> BashOpts {
+    let mut opts: BashOpts = default_bash_opts();
+    let n: Int = list_len(args);
+    let mut i: Int = 0;
+
+    while i < n {
+        let arg: String = list_get(args, i);
+        if arg == "-h" || arg == "--help" {
+            opts.action = "help";
+            return opts;
+        } else if arg == "-v" || arg == "--version" {
+            opts.action = "version";
+            return opts;
+        } else if arg == "--mcp" {
+            opts.action = "mcp";
+            return opts;
+        } else if arg == "--json" {
+            opts.json_mode = true;
+        } else if arg == "-a" || arg == "--audit" {
+            opts.mode = "audit";
+        } else if arg == "-t" || arg == "--transpile" {
+            opts.mode = "transpile";
+        } else if arg == "--ast" {
+            opts.mode = "ast";
+        } else if arg == "-c" || arg == "--command" {
+            if i + 1 < n {
+                i = i + 1;
+                opts.inline_cmd = list_get(args, i);
+            }
+        } else if !str_starts_with(arg, "-") {
+            opts.script_files = list_push(opts.script_files, arg);
+        }
+        i = i + 1;
+    }
+
+    return opts;
+}

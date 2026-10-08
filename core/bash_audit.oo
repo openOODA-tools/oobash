@@ -1,0 +1,153 @@
+// # oobash Capability Security Auditor
+//
+// Logline: Audits shell scripts to deduce required openOODA capabilities and risk level.
+//
+// Setup: Inspects command names, argument patterns, and file redirections.
+//
+// Beats:
+//   1. Inspect commands and redirections for filesystem read and write capability requirements.
+//   2. Identify external process invocation and network socket demands.
+//   3. Compute composite security risk classification.
+
+import "core/bash_parse.oo";
+
+pub type BashAuditResult = struct {
+    total_commands: Int,
+    total_pipelines: Int,
+    total_redirects: Int,
+    need_fs_read: Bool,
+    need_fs_write: Bool,
+    need_process: Bool,
+    need_env: Bool,
+    need_net: Bool,
+    risk_level: String,
+    commands_detected: List[String]
+};
+
+fn is_read_cmd(name: String) -> Bool {
+    return name == "cat" || name == "grep" || name == "head" || name == "tail"
+        || name == "less" || name == "more" || name == "sed" || name == "awk"
+        || name == "wc" || name == "sort" || name == "uniq" || name == "cut"
+        || name == "oocat" || name == "oogrep" || name == "ootail";
+}
+
+fn is_write_cmd(name: String) -> Bool {
+    return name == "rm" || name == "cp" || name == "mv" || name == "touch"
+        || name == "mkdir" || name == "rmdir" || name == "tee" || name == "chmod"
+        || name == "chown" || name == "truncate" || name == "dd";
+}
+
+fn is_net_cmd(name: String) -> Bool {
+    return name == "curl" || name == "wget" || name == "nc" || name == "netcat"
+        || name == "ssh" || name == "scp" || name == "rsync" || name == "ping"
+        || name == "oocurl" || name == "fetch";
+}
+
+fn is_env_cmd(name: String) -> Bool {
+    return name == "export" || name == "env" || name == "set" || name == "unset";
+}
+
+fn contains_env_var(s: String) -> Bool {
+    let n: Int = chars_len(s);
+    let mut i: Int = 0;
+    while i < n {
+        if char_at(s, i) == "$" {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+pub fn audit_script(script: ShellScript) -> BashAuditResult {
+    let mut fs_read: Bool = false;
+    let mut fs_write: Bool = false;
+    let mut proc_req: Bool = false;
+    let mut env_req: Bool = false;
+    let mut net_req: Bool = false;
+    let mut cmds: List[String] = list_new();
+
+    let n_pipes: Int = list_len(script.pipelines);
+    let mut i: Int = 0;
+
+    while i < n_pipes {
+        let p: ShellPipeline = list_get(script.pipelines, i);
+        let n_cmds: Int = list_len(p.commands);
+        let mut j: Int = 0;
+
+        while j < n_cmds {
+            let c: ShellCommand = list_get(p.commands, j);
+            if chars_len(c.name) > 0 {
+                cmds = list_push(cmds, c.name);
+                if c.name != "echo" && c.name != "printf" && c.name != "true" && c.name != "false" {
+                    proc_req = true;
+                }
+                if is_read_cmd(c.name) {
+                    fs_read = true;
+                }
+                if is_write_cmd(c.name) {
+                    fs_write = true;
+                }
+                if is_net_cmd(c.name) {
+                    net_req = true;
+                }
+                if is_env_cmd(c.name) {
+                    env_req = true;
+                }
+            }
+
+            let n_args: Int = list_len(c.args);
+            let mut k: Int = 0;
+            while k < n_args {
+                let a: String = list_get(c.args, k);
+                if contains_env_var(a) {
+                    env_req = true;
+                }
+                k = k + 1;
+            }
+
+            let n_redirs: Int = list_len(c.redirects);
+            let mut r: Int = 0;
+            while r < n_redirs {
+                let redir: ShellRedirect = list_get(c.redirects, r);
+                if redir.kind == "redir_in" {
+                    fs_read = true;
+                } else if redir.kind == "redir_out" || redir.kind == "append" {
+                    fs_write = true;
+                }
+                r = r + 1;
+            }
+
+            j = j + 1;
+        }
+
+        i = i + 1;
+    }
+
+    let mut risk: String = "low";
+    if net_req || fs_write {
+        risk = "medium";
+    }
+    let n_detected: Int = list_len(cmds);
+    let mut d: Int = 0;
+    while d < n_detected {
+        let cname: String = list_get(cmds, d);
+        if cname == "rm" || cname == "dd" || cname == "mkfs" || cname == "chmod" {
+            risk = "high";
+        }
+        d = d + 1;
+    }
+
+    return BashAuditResult {
+        total_commands: count_total_commands(script),
+        total_pipelines: n_pipes,
+        total_redirects: count_total_redirects(script),
+        need_fs_read: fs_read,
+        need_fs_write: fs_write,
+        need_process: proc_req,
+        need_env: env_req,
+        need_net: net_req,
+        risk_level: risk,
+        commands_detected: cmds
+    };
+}

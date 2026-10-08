@@ -1,52 +1,111 @@
-// # oobash Main Entry Point
+// # oobash Main Entry Point - Sovereign Bash Compatibility Compiler
 //
-// Logline: Strict subset shell translating POSIX shell scripts into capability-audited openOODA AST.
+// Logline: Audits, parses, and compiles POSIX shell scripts into capability-audited openOODA ASTs.
 //
 // Setup: Demands explicit capability tokens and standard argument list.
 //
 // Beats:
 //   1. Parse command-line options and dispatch --help, --version, or --mcp.
-//   2. Execute capability-bounded oobash operations.
-//   3. Format and output structured results to standard output.
+//   2. Ingest shell scripts from inline commands (-c) or file arguments.
+//   3. Execute security audit, AST generation, or native transpilation.
+
+import "core/bash_lex.oo";
+import "core/bash_parse.oo";
+import "core/bash_audit.oo";
+import "core/bash_transpile.oo";
+import "render/bash_theme.oo";
+import "ipc/bash_opts.oo";
+import "ipc/mcp_serve.oo";
 
 fn render_help() -> String {
-    return "oobash 0.1.0 (openOODA sovereign shell & terminal)\n"
-        + "usage: oobash [options] [ARGUMENTS]...\n\n"
-        + "Strict subset shell translating POSIX shell scripts into capability-audited openOODA AST.\n\n"
+    return "oobash 0.2.0 (openOODA sovereign shell compatibility compiler)\n"
+        + "usage: oobash [options] [script_file...]\n"
+        + "   or: oobash [options] -c \"command string\"\n\n"
+        + "Audits, parses, and transpiles shell scripts into capability-bounded openOODA code.\n\n"
         + "Options:\n"
         + "  -h, --help           display this help and exit\n"
         + "  -v, --version        output version information and exit\n"
-        + "      --json           output formatted as JSON Lines\n"
-        + "      --color <WHEN>   colorize output: auto, always, never [default: auto]\n"
-        + "      --theme <NAME>   override active oote palette\n"
+        + "  -c, --command CMD    execute and audit script string inline\n"
+        + "  -a, --audit          perform capability security audit (default)\n"
+        + "  -t, --transpile      transpile shell script into openOODA source\n"
+        + "      --ast            emit abstract syntax tree in JSON format\n"
+        + "      --json           format output as JSON envelope\n"
         + "      --mcp            run as Model Context Protocol stdio server\n";
 }
 
-fn render_version() -> String {
-    return "oobash 0.1.0 (openOODA sovereign shell & terminal)\n";
+fn process_script_content(
+    content: String,
+    label: String,
+    mode: String,
+    json_mode: Bool
+) {
+    let tokens: List[ShellToken] = tokenize_script(content);
+    let ast: ShellScript = parse_script(tokens);
+
+    if mode == "transpile" {
+        let code: String = transpile_to_openooda(ast);
+        if json_mode {
+            println(render_transpile_json(label, code));
+        } else {
+            print(code);
+        }
+    } else if mode == "ast" {
+        println(render_ast_json(ast));
+    } else {
+        let audit: BashAuditResult = audit_script(ast);
+        if json_mode {
+            println(render_audit_json(label, audit));
+        } else {
+            println(render_audit_text(label, audit));
+        }
+    }
 }
 
-fn main(args: List[String]) -> Int {
-    let num_args: Int = list_len(args);
-    let mut i: Int = 0;
+pub fn main(
+    fs: &FsReadCap,
+    proc_cap: &ProcessCap,
+    env: &EnvCap,
+    args: List[String]
+) -> Result[Int, String] {
+    let opts: BashOpts = parse_bash_args(args);
 
-    while i < num_args {
-        let arg: String = list_get(args, i);
-        if arg == "-h" || arg == "--help" {
-            print(render_help());
-            return 0;
-        }
-        if arg == "-v" || arg == "--version" {
-            print(render_version());
-            return 0;
-        }
-        if arg == "--mcp" {
-            print("{\"jsonrpc\":\"2.0\",\"result\":{\"status\":\"ready\",\"tool\":\"oobash\"}}\n");
-            return 0;
+    if opts.action == "help" {
+        print(render_help());
+        return Ok(0);
+    }
+    if opts.action == "version" {
+        println("oobash 0.2.0 (openOODA sovereign shell compatibility compiler)");
+        return Ok(0);
+    }
+    if opts.action == "mcp" {
+        run_mcp_server(fs);
+        return Ok(0);
+    }
+
+    if chars_len(opts.inline_cmd) > 0 {
+        process_script_content(opts.inline_cmd, "-c", opts.mode, opts.json_mode);
+        return Ok(0);
+    }
+
+    let n_files: Int = list_len(opts.script_files);
+    if n_files == 0 {
+        println("oobash: missing operand or -c command");
+        println("Try 'oobash --help' for more information.");
+        return Ok(1);
+    }
+
+    let mut i: Int = 0;
+    while i < n_files {
+        let path: String = list_get(opts.script_files, i);
+        let read_res: Result[String, String] = read_file(fs, path);
+        if !read_res.is_ok() {
+            println("oobash: cannot open file: " + path);
+        } else {
+            let content: String = match read_res { Ok(s) => s, Err(_) => "" };
+            process_script_content(content, path, opts.mode, opts.json_mode);
         }
         i = i + 1;
     }
 
-    print("oobash: sovereign capability-bounded utility ready\n");
-    return 0;
+    return Ok(0);
 }

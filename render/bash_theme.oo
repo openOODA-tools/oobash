@@ -1,0 +1,119 @@
+// # oobash Rendering and Diagnostics Theme
+//
+// Logline: Formats shell analysis, AST nodes, and capability audits for terminal and JSON envelopes.
+//
+// Setup: Pure string formatter supporting oote styling and JSON envelope serialization.
+//
+// Beats:
+//   1. Provide ANSI styling helpers for terminal diagnostics and status tags.
+//   2. Serialize capability audit reports into human-readable and JSON envelopes.
+//   3. Serialize AST parse trees into structured JSON trees.
+
+import "core/bash_parse.oo";
+import "core/bash_audit.oo";
+
+pub fn ansi_reset() -> String { return "\x1b[0m"; }
+pub fn ansi_bold() -> String { return "\x1b[1m"; }
+pub fn ansi_dim() -> String { return "\x1b[2m"; }
+pub fn ansi_cyan() -> String { return "\x1b[36m"; }
+pub fn ansi_green() -> String { return "\x1b[32m"; }
+pub fn ansi_yellow() -> String { return "\x1b[33m"; }
+pub fn ansi_red() -> String { return "\x1b[31m"; }
+
+fn json_escape(s: String) -> String {
+    let mut out: String = "";
+    let n: Int = chars_len(s);
+    let mut i: Int = 0;
+    while i < n {
+        let c: String = char_at(s, i);
+        if c == "\\" {
+            out = out + "\\\\";
+        } else if c == "\"" {
+            out = out + "\\\"";
+        } else if c == "\n" {
+            out = out + "\\n";
+        } else if c == "\r" {
+            out = out + "\\r";
+        } else if c == "\t" {
+            out = out + "\\t";
+        } else {
+            out = out + c;
+        }
+        i = i + 1;
+    }
+    return out;
+}
+
+pub fn render_audit_text(name: String, audit: BashAuditResult) -> String {
+    let mut out: String = ansi_bold() + "oobash Capability Audit: " + ansi_cyan() + name + ansi_reset() + "\n";
+    out = out + "  Commands   : " + to_string(audit.total_commands) + "\n";
+    out = out + "  Pipelines  : " + to_string(audit.total_pipelines) + "\n";
+    out = out + "  Redirects  : " + to_string(audit.total_redirects) + "\n";
+    out = out + "  Risk Level : ";
+    if audit.risk_level == "high" {
+        out = out + ansi_red() + audit.risk_level + ansi_reset() + "\n";
+    } else if audit.risk_level == "medium" {
+        out = out + ansi_yellow() + audit.risk_level + ansi_reset() + "\n";
+    } else {
+        out = out + ansi_green() + audit.risk_level + ansi_reset() + "\n";
+    }
+    out = out + "  Required Capabilities:\n";
+    if audit.need_fs_read { out = out + "    + FsReadCap (File read / input redirect)\n"; }
+    if audit.need_fs_write { out = out + "    + FsWriteCap (File write / output redirect)\n"; }
+    if audit.need_process { out = out + "    + ProcessCap (Child process execution)\n"; }
+    if audit.need_env { out = out + "    + EnvCap (Environment variables)\n"; }
+    if audit.need_net { out = out + "    + NetCap (Network client sockets)\n"; }
+    return out;
+}
+
+pub fn render_audit_json(name: String, audit: BashAuditResult) -> String {
+    let mut out: String = "{\"operation\":\"bash_audit\"";
+    out = out + ",\"target\":\"" + json_escape(name) + "\"";
+    out = out + ",\"total_commands\":" + to_string(audit.total_commands);
+    out = out + ",\"total_pipelines\":" + to_string(audit.total_pipelines);
+    out = out + ",\"total_redirects\":" + to_string(audit.total_redirects);
+    out = out + ",\"need_fs_read\":" + (if audit.need_fs_read { "true" } else { "false" });
+    out = out + ",\"need_fs_write\":" + (if audit.need_fs_write { "true" } else { "false" });
+    out = out + ",\"need_process\":" + (if audit.need_process { "true" } else { "false" });
+    out = out + ",\"need_env\":" + (if audit.need_env { "true" } else { "false" });
+    out = out + ",\"need_net\":" + (if audit.need_net { "true" } else { "false" });
+    out = out + ",\"risk_level\":\"" + audit.risk_level + "\"}";
+    return out;
+}
+
+pub fn render_ast_json(script: ShellScript) -> String {
+    let mut out: String = "{\"pipelines\":[";
+    let n_pipes: Int = list_len(script.pipelines);
+    let mut i: Int = 0;
+    while i < n_pipes {
+        if i > 0 { out = out + ","; }
+        let p: ShellPipeline = list_get(script.pipelines, i);
+        out = out + "{\"op\":\"" + p.op + "\",\"commands\":[";
+        let n_cmds: Int = list_len(p.commands);
+        let mut j: Int = 0;
+        while j < n_cmds {
+            if j > 0 { out = out + ","; }
+            let c: ShellCommand = list_get(p.commands, j);
+            out = out + "{\"name\":\"" + json_escape(c.name) + "\",\"args\":[";
+            let n_args: Int = list_len(c.args);
+            let mut k: Int = 0;
+            while k < n_args {
+                if k > 0 { out = out + ","; }
+                out = out + "\"" + json_escape(list_get(c.args, k)) + "\"";
+                k = k + 1;
+            }
+            out = out + "]}";
+            j = j + 1;
+        }
+        out = out + "]}";
+        i = i + 1;
+    }
+    out = out + "]}";
+    return out;
+}
+
+pub fn render_transpile_json(name: String, code: String) -> String {
+    return "{\"operation\":\"bash_transpile\""
+        + ",\"target\":\"" + json_escape(name) + "\""
+        + ",\"transpiled_code\":\"" + json_escape(code) + "\"}";
+}
